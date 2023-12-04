@@ -1,2 +1,0 @@
-class Config:
-    TOKEN = "6888513390:AAF7dH_yrNSx8H_qaT5L3YqzCtBT1c1v9gs"

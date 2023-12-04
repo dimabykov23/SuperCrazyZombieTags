@@ -1,7 +1,7 @@
 import os
 import random
 
-import aiogram
+from dotenv import load_dotenv
 from aiogram import Bot
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -17,10 +17,9 @@ from aiogram.types import (
 from aiogram.dispatcher.filters.state import State, StatesGroup
 import aiofiles
 
-from config import Config
-
+load_dotenv()
 ROOM_SERIES = 1
-bot: Bot = Bot(token=Config.TOKEN)
+bot: Bot = Bot(token=os.getenv("TELEGRAM_API_TOKEN"))
 memory_storage: MemoryStorage = MemoryStorage()
 dispatcher: Dispatcher = Dispatcher(bot, storage=memory_storage)
 
@@ -89,9 +88,9 @@ async def process_room_number(message: Message, state: FSMContext):
             tguser = message.from_user
             if str(tguser.id) not in users:
                 tguser_name = (
-                    dict(tguser).get("first_name", "")
-                    + " "
-                    + dict(tguser).get("last_name", "")
+                        dict(tguser).get("first_name", "")
+                        + " "
+                        + dict(tguser).get("last_name", "")
                 )
                 for user in users:
                     if not user.startswith("tagger"):
@@ -114,7 +113,6 @@ async def process_room_number(message: Message, state: FSMContext):
         )
 
 
-
 @dispatcher.callback_query_handler(
     lambda call: call.data and call.data.startswith("choose_tagger")
 )
@@ -126,9 +124,9 @@ async def choose_tagger(call: CallbackQuery):
             tagger = random.choice(users)
             tagger_user = dict(await bot.get_chat(int(tagger)))
             tagger_name = (
-                tagger_user.get("first_name", "")
-                + " "
-                + tagger_user.get("last_name", "")
+                    tagger_user.get("first_name", "")
+                    + " "
+                    + tagger_user.get("last_name", "")
             )
             users.remove(tagger)
             users.append(tagger + " tagger")
@@ -156,9 +154,9 @@ async def start_game(call: CallbackQuery):
             tagger = tagger[0]
             tagger_user = dict(await bot.get_chat(int(tagger.split()[0])))
             tagger_name = (
-                tagger_user.get("first_name", "")
-                + " "
-                + tagger_user.get("last_name", "")
+                    tagger_user.get("first_name", "")
+                    + " "
+                    + tagger_user.get("last_name", "")
             )
             for user in users:
                 user = user.split()[0]
@@ -184,7 +182,7 @@ async def cancel_input(call: CallbackQuery, state: FSMContext):
     lambda message: message.text == button_help.text or message.text == "/help"
 )
 async def help_command(message: Message):
-    await message.answer("Вот правила игры...")
+    await message.answer("Привет, добро подаловать в безумные зомби прятки, если ты тут, то тебе явно нечего терять, так что или создавать комнату, или присоединяйтся к уже существующий, спросив ее номер у хоста! Удачных зомби пряток!\n/start - перезапускает игру\n/help - поясняет правила!")
 
 
 if __name__ == "__main__":
