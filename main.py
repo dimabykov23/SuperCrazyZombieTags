@@ -1,11 +1,13 @@
 import os
 import random
+import glob
 
-from dotenv import load_dotenv
+import aiofiles
 from aiogram import Bot
+from aiogram import Dispatcher, executor
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram import Dispatcher, executor
+from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
@@ -13,9 +15,9 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     CallbackQuery,
+    ReplyKeyboardRemove
 )
-from aiogram.dispatcher.filters.state import State, StatesGroup
-import aiofiles
+from dotenv import load_dotenv
 
 load_dotenv()
 ROOM_SERIES = 1
@@ -118,28 +120,29 @@ async def process_room_number(message: Message, state: FSMContext):
 )
 async def choose_tagger(call: CallbackQuery):
     room_number = call.data.split()[1]
-    async with aiofiles.open(f"rooms/{room_number}.txt", "r+") as file:
+    async with aiofiles.open(f"rooms/{room_number}.txt", "r") as file:
         users = (await file.read()).strip().split("\n")
-        if len(users) > 1:
-            tagger = random.choice(users)
-            tagger_user = dict(await bot.get_chat(int(tagger)))
-            tagger_name = (
-                    tagger_user.get("first_name", "")
-                    + " "
-                    + tagger_user.get("last_name", "")
-            )
-            users.remove(tagger)
-            users.append(tagger + " tagger")
+    if len(users) > 1:
+        tagger = random.choice(users)
+        tagger_user = dict(await bot.get_chat(int(tagger)))
+        tagger_name = (
+                tagger_user.get("first_name", "")
+                + " "
+                + tagger_user.get("last_name", "")
+        )
+        users.remove(tagger)
+        users.append(tagger + " tagger")
+        async with aiofiles.open(f"rooms/{room_number}.txt", "w") as file:
             await file.write("\n".join(users))
-            for user in users:
-                user = user.split()[0]
-                await bot.send_message(
-                    int(user),
-                    f"Вода выбран: <a href='tg://user?id={tagger}'>{tagger_name}</a>",
-                    parse_mode="HTML",
-                )
-        else:
-            await call.message.answer("Пока в комнате только один человек")
+        for user in users:
+            user = user.split()[0]
+            await bot.send_message(
+                int(user),
+                f"Вода выбран: <a href='tg://user?id={tagger}'>{tagger_name}</a>",
+                parse_mode="HTML",
+            )
+    else:
+        await call.answer("Пока в комнате только один человек")
 
 
 @dispatcher.callback_query_handler(
@@ -148,8 +151,8 @@ async def choose_tagger(call: CallbackQuery):
 async def start_game(call: CallbackQuery):
     room_number = call.data.split()[1]
     async with aiofiles.open(f"rooms/{room_number}.txt", "r") as file:
-        users = (await file.read()).strip().split("\n")
-        tagger = list(filter(lambda x: x.endswith("tagger"), users))
+        players = (await file.read()).strip().split("\n")
+        tagger = list(filter(lambda x: x.endswith("tagger"), players))
         if len(tagger) == 1:
             tagger = tagger[0]
             tagger_user = dict(await bot.get_chat(int(tagger.split()[0])))
@@ -158,13 +161,52 @@ async def start_game(call: CallbackQuery):
                     + " "
                     + tagger_user.get("last_name", "")
             )
-            for user in users:
+            for user in set(players):
                 user = user.split()[0]
+                if user not in tagger:
+                    report_keyb = InlineKeyboardMarkup().row(InlineKeyboardButton("Меня осалили", callback_data=f"tagged {room_number}"))
+                else:
+                    report_keyb = None
                 await bot.send_message(
                     int(user),
                     f"Игра началась, вода: <a href='tg://user?id={tagger}'>{tagger_name}</a>",
                     parse_mode="HTML",
+                    reply_markup=report_keyb
                 )
+        elif len(players) < 2:
+            await call.answer("В комнате слишком мало людей для начала игры")
+        elif not tagger:
+            await call.answer("Для начала игры сначала нужно выбрать воду")
+
+
+@dispatcher.callback_query_handler(
+    lambda call: call.data and call.data.startswith("tagged")
+)
+async def start_game(call: CallbackQuery):
+    await call.message.edit_reply_markup()
+    room_number = call.data.split()[1]
+    new_tagger_id = call.message.chat.id
+    new_tagger_user = dict(await bot.get_chat(new_tagger_id))
+    new_tagger_name = (
+            new_tagger_user.get("first_name", "")
+            + " "
+            + new_tagger_user.get("last_name", "")
+    )
+    async with aiofiles.open(f"rooms/{room_number}.txt", "r") as file:
+        players = (await file.read()).strip().split("\n")
+        for player in set(players):
+            if str(new_tagger_id) not in player:
+                report_keyb = InlineKeyboardMarkup().row(
+                    InlineKeyboardButton("Меня осалили", callback_data=f"tagged {room_number}"))
+            else:
+                report_keyb = None
+            await bot.send_message(
+                int(player.split()[0]),
+                f"Новый вода: <a href='tg://user?id={new_tagger_id}'>{new_tagger_name}</a>",
+                parse_mode="HTML",
+                reply_markup=report_keyb
+            )
+
 
 
 @dispatcher.callback_query_handler(
@@ -182,8 +224,14 @@ async def cancel_input(call: CallbackQuery, state: FSMContext):
     lambda message: message.text == button_help.text or message.text == "/help"
 )
 async def help_command(message: Message):
-    await message.answer("Привет, добро подаловать в безумные зомби прятки, если ты тут, то тебе явно нечего терять, так что или создавать комнату, или присоединяйтся к уже существующий, спросив ее номер у хоста! Удачных зомби пряток!\n/start - перезапускает игру\n/help - поясняет правила!")
+    await message.answer("Привет, добро подаловать в безумные зомби прятки, если ты тут, то тебе явно нечего терять, \
+так что или создавать комнату, или присоединяйтся к уже существующий, спросив ее номер у хоста! Удачных зомби пряток!\n\
+/start - перезапускает игру\n/help - поясняет правила!"
+                         )
 
 
 if __name__ == "__main__":
+    rooms = glob.glob('rooms/*')
+    for room in rooms:
+        os.remove(room)
     executor.start_polling(dispatcher=dispatcher)
